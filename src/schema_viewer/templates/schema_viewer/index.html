@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Django Schema Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: #1e293b;
+            border-right: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .sidebar-header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+
+        .search-box {
+            padding: 12px 16px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-size: 14px;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .model-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .app-group {
+            margin-bottom: 8px;
+        }
+
+        .app-header {
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #94a3b8;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .app-header:hover {
+            color: #e2e8f0;
+        }
+
+        .app-header .arrow {
+            transition: transform 0.2s;
+        }
+
+        .app-header.collapsed .arrow {
+            transform: rotate(-90deg);
+        }
+
+        .model-item {
+            padding: 8px 12px 8px 28px;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            color: #cbd5e1;
+        }
+
+        .model-item:hover {
+            background: #334155;
+            color: #f8fafc;
+        }
+
+        .model-item.selected {
+            background: #3b82f6;
+            color: #ffffff;
+        }
+
+        /* Main canvas area */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .toolbar {
+            padding: 12px 16px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .toolbar button {
+            padding: 8px 16px;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .toolbar button:hover {
+            background: #334155;
+        }
+
+        .toolbar label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #94a3b8;
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Detail panel */
+        .detail-panel {
+            width: 350px;
+            background: #1e293b;
+            border-left: 1px solid #334155;
+            overflow-y: auto;
+            display: none;
+            flex-shrink: 0;
+        }
+
+        .detail-panel.visible {
+            display: block;
+        }
+
+        .detail-header {
+            padding: 16px;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .detail-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .detail-header .close-btn {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            font-size: 20px;
+        }
+
+        .detail-section {
+            padding: 16px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .detail-section h3 {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #94a3b8;
+            margin-bottom: 12px;
+        }
+
+        .field-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #334155;
+        }
+
+        .field-item:last-child {
+            border-bottom: none;
+        }
+
+        .field-name {
+            font-weight: 500;
+            color: #f8fafc;
+        }
+
+        .field-type {
+            font-size: 12px;
+            color: #94a3b8;
+            font-family: monospace;
+        }
+
+        .field-badges {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #334155;
+            color: #94a3b8;
+        }
+
+        .badge.primary {
+            background: #3b82f6;
+            color: #ffffff;
+        }
+
+        .badge.unique {
+            background: #8b5cf6;
+            color: #ffffff;
+        }
+
+        .badge.nullable {
+            background: #f59e0b;
+            color: #000000;
+        }
+
+        .badge.indexed {
+            background: #10b981;
+            color: #ffffff;
+        }
+
+        /* Loading state */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #94a3b8;
+        }
+
+        /* Node styles for canvas */
+        .model-node {
+            position: absolute;
+            background: #1e293b;
+            border: 2px solid #334155;
+            border-radius: 8px;
+            min-width: 200px;
+            cursor: move;
+            user-select: none;
+        }
+
+        .model-node:hover {
+            border-color: #3b82f6;
+        }
+
+        .model-node.selected {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        }
+
+        .model-node-header {
+            padding: 12px;
+            background: #334155;
+            border-radius: 6px 6px 0 0;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .model-node-app {
+            font-size: 10px;
+            color: #94a3b8;
+            font-weight: normal;
+        }
+
+        .model-node-fields {
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        .model-node-field {
+            padding: 4px 0;
+            display: flex;
+            justify-content: space-between;
+            color: #cbd5e1;
+        }
+
+        .model-node-field-type {
+            color: #94a3b8;
+            font-family: monospace;
+            font-size: 11px;
+        }
+
+        /* Relationship lines */
+        .relationship-line {
+            stroke: #3b82f6;
+            stroke-width: 2;
+            fill: none;
+        }
+
+        .relationship-line.foreign-key {
+            stroke: #3b82f6;
+        }
+
+        .relationship-line.one-to-one {
+            stroke: #8b5cf6;
+        }
+
+        .relationship-line.many-to-many {
+            stroke: #10b981;
+            stroke-dasharray: 5, 5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>Schema Viewer</h1>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search" placeholder="Search models...">
+            </div>
+            <div class="model-list" id="model-list">
+                <div class="loading">Loading schema...</div>
+            </div>
+        </aside>
+
+        <main class="main">
+            <div class="toolbar">
+                <button id="zoom-in">Zoom In</button>
+                <button id="zoom-out">Zoom Out</button>
+                <button id="fit-view">Fit View</button>
+                <label>
+                    <input type="checkbox" id="show-django" />
+                    Show Django models
+                </label>
+            </div>
+            <div class="canvas-container">
+                <svg id="canvas"></svg>
+            </div>
+        </main>
+
+        <aside class="detail-panel" id="detail-panel">
+            <div class="detail-header">
+                <h2 id="detail-title">Model Details</h2>
+                <button class="close-btn" id="close-detail">&times;</button>
+            </div>
+            <div id="detail-content">
+                <!-- Populated by JavaScript -->
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        // State
+        let schema = null;
+        let selectedModel = null;
+        let transform = { x: 0, y: 0, scale: 1 };
+        let nodePositions = {};
+        let isDragging = false;
+        let dragTarget = null;
+        let dragOffset = { x: 0, y: 0 };
+
+        // DOM elements
+        const modelList = document.getElementById('model-list');
+        const canvas = document.getElementById('canvas');
+        const detailPanel = document.getElementById('detail-panel');
+        const detailTitle = document.getElementById('detail-title');
+        const detailContent = document.getElementById('detail-content');
+        const searchInput = document.getElementById('search');
+        const showDjangoCheckbox = document.getElementById('show-django');
+
+        // Fetch schema data
+        async function fetchSchema() {
+            const excludeDjango = !showDjangoCheckbox.checked;
+            const response = await fetch(`api/schema/?exclude_django=${excludeDjango}`);
+            schema = await response.json();
+            renderModelList();
+            renderCanvas();
+        }
+
+        // Render the model list in sidebar
+        function renderModelList() {
+            const searchTerm = searchInput.value.toLowerCase();
+            let html = '';
+
+            for (const [appLabel, appData] of Object.entries(schema.apps)) {
+                const models = Object.entries(appData.models).filter(([name]) =>
+                    name.toLowerCase().includes(searchTerm)
+                );
+
+                if (models.length === 0) continue;
+
+                html += `
+                    <div class="app-group">
+                        <div class="app-header" data-app="${appLabel}">
+                            <span class="arrow">▼</span>
+                            ${appData.verbose_name}
+                        </div>
+                        <div class="app-models">
+                            ${models.map(([modelName, model]) => `
+                                <div class="model-item" data-app="${appLabel}" data-model="${modelName}">
+                                    ${model.verbose_name}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            modelList.innerHTML = html || '<div class="loading">No models found</div>';
+
+            // Add event listeners
+            modelList.querySelectorAll('.app-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    header.classList.toggle('collapsed');
+                    header.nextElementSibling.style.display =
+                        header.classList.contains('collapsed') ? 'none' : 'block';
+                });
+            });
+
+            modelList.querySelectorAll('.model-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    selectModel(item.dataset.app, item.dataset.model);
+                });
+            });
+        }
+
+        // Calculate node positions using a simple grid layout
+        function calculatePositions() {
+            const startX = 50;
+            const startY = 50;
+            const nodeWidth = 220;
+            const nodeHeight = 150;
+            const gapX = 100;
+            const gapY = 50;
+            const nodesPerRow = 4;
+
+            let index = 0;
+            for (const [appLabel, appData] of Object.entries(schema.apps)) {
+                for (const modelName of Object.keys(appData.models)) {
+                    const key = `${appLabel}.${modelName}`;
+                    if (!nodePositions[key]) {
+                        const row = Math.floor(index / nodesPerRow);
+                        const col = index % nodesPerRow;
+                        nodePositions[key] = {
+                            x: startX + col * (nodeWidth + gapX),
+                            y: startY + row * (nodeHeight + gapY)
+                        };
+                    }
+                    index++;
+                }
+            }
+        }
+
+        // Render the canvas with nodes and relationships
+        function renderCanvas() {
+            calculatePositions();
+
+            let nodesHtml = '';
+            let edgesHtml = '';
+
+            // Draw edges first (so they're behind nodes)
+            for (const [appLabel, appData] of Object.entries(schema.apps)) {
+                for (const [modelName, model] of Object.entries(appData.models)) {
+                    const sourceKey = `${appLabel}.${modelName}`;
+                    const sourcePos = nodePositions[sourceKey];
+
+                    for (const rel of model.relationships || []) {
+                        if (rel.direction !== 'forward') continue;
+
+                        const targetKey = `${rel.target_app}.${rel.target_model}`;
+                        const targetPos = nodePositions[targetKey];
+
+                        if (!targetPos) continue;
+
+                        const relClass = rel.type.replace('_', '-');
+                        const x1 = sourcePos.x + 110;
+                        const y1 = sourcePos.y + 60;
+                        const x2 = targetPos.x + 110;
+                        const y2 = targetPos.y + 60;
+
+                        // Simple curved line
+                        const midX = (x1 + x2) / 2;
+                        edgesHtml += `
+                            <path class="relationship-line ${relClass}"
+                                  d="M ${x1} ${y1} Q ${midX} ${y1} ${midX} ${(y1 + y2) / 2} T ${x2} ${y2}"
+                                  data-source="${sourceKey}"
+                                  data-target="${targetKey}" />
+                        `;
+                    }
+                }
+            }
+
+            // Draw nodes
+            for (const [appLabel, appData] of Object.entries(schema.apps)) {
+                for (const [modelName, model] of Object.entries(appData.models)) {
+                    const key = `${appLabel}.${modelName}`;
+                    const pos = nodePositions[key];
+                    const isSelected = selectedModel === key;
+
+                    const fields = (model.fields || []).slice(0, 5);
+                    const fieldsHtml = fields.map(f => `
+                        <div class="model-node-field">
+                            <span>${f.name}</span>
+                            <span class="model-node-field-type">${f.type}</span>
+                        </div>
+                    `).join('');
+
+                    nodesHtml += `
+                        <foreignObject x="${pos.x}" y="${pos.y}" width="220" height="auto" class="node-wrapper" data-key="${key}">
+                            <div xmlns="http://www.w3.org/1999/xhtml" 
+                                 class="model-node ${isSelected ? 'selected' : ''}"
+                                 data-app="${appLabel}" 
+                                 data-model="${modelName}">
+                                <div class="model-node-header">
+                                    ${model.verbose_name}
+                                    <div class="model-node-app">${appData.verbose_name}</div>
+                                </div>
+                                <div class="model-node-fields">
+                                    ${fieldsHtml}
+                                    ${model.fields?.length > 5 ? `<div style="color: #64748b; padding-top: 4px;">+${model.fields.length - 5} more fields</div>` : ''}
+                                </div>
+                            </div>
+                        </foreignObject>
+                    `;
+                }
+            }
+
+            canvas.innerHTML = `
+                <g transform="translate(${transform.x}, ${transform.y}) scale(${transform.scale})">
+                    ${edgesHtml}
+                    ${nodesHtml}
+                </g>
+            `;
+
+            // Add node event listeners
+            canvas.querySelectorAll('.model-node').forEach(node => {
+                node.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectModel(node.dataset.app, node.dataset.model);
+                });
+
+                node.addEventListener('mousedown', (e) => {
+                    isDragging = true;
+                    dragTarget = `${node.dataset.app}.${node.dataset.model}`;
+                    const pos = nodePositions[dragTarget];
+                    dragOffset = {
+                        x: (e.clientX - transform.x) / transform.scale - pos.x,
+                        y: (e.clientY - transform.y) / transform.scale - pos.y
+                    };
+                });
+            });
+        }
+
+        // Select a model and show details
+        async function selectModel(appLabel, modelName) {
+            selectedModel = `${appLabel}.${modelName}`;
+
+            // Update UI
+            modelList.querySelectorAll('.model-item').forEach(item => {
+                item.classList.toggle('selected',
+                    item.dataset.app === appLabel && item.dataset.model === modelName);
+            });
+
+            // Fetch and show details
+            const response = await fetch(`api/model/${appLabel}/${modelName}/`);
+            const model = await response.json();
+
+            detailTitle.textContent = model.verbose_name;
+
+            let html = `
+                <div class="detail-section">
+                    <h3>Info</h3>
+                    <div class="field-item">
+                        <div class="field-name">Database Table</div>
+                        <div class="field-type">${model.db_table}</div>
+                    </div>
+                    ${model.proxy ? '<div class="badge">Proxy Model</div>' : ''}
+                    ${model.abstract ? '<div class="badge">Abstract</div>' : ''}
+                </div>
+
+                <div class="detail-section">
+                    <h3>Fields (${model.fields?.length || 0})</h3>
+                    ${(model.fields || []).map(f => `
+                        <div class="field-item">
+                            <div class="field-name">${f.name}</div>
+                            <div class="field-type">${f.type}${f.max_length ? `(${f.max_length})` : ''}</div>
+                            <div class="field-badges">
+                                ${f.primary_key ? '<span class="badge primary">PK</span>' : ''}
+                                ${f.unique ? '<span class="badge unique">Unique</span>' : ''}
+                                ${f.null ? '<span class="badge nullable">Nullable</span>' : ''}
+                                ${f.db_index ? '<span class="badge indexed">Indexed</span>' : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+
+            if (model.relationships?.length) {
+                html += `
+                    <div class="detail-section">
+                        <h3>Relationships (${model.relationships.length})</h3>
+                        ${model.relationships.map(r => `
+                            <div class="field-item">
+                                <div class="field-name">${r.name}</div>
+                                <div class="field-type">${r.type} → ${r.target_app}.${r.target_model}</div>
+                                <div class="field-badges">
+                                    <span class="badge">${r.direction}</span>
+                                    ${r.on_delete ? `<span class="badge">${r.on_delete}</span>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            detailContent.innerHTML = html;
+            detailPanel.classList.add('visible');
+
+            renderCanvas();
+        }
+
+        // Event listeners
+        document.getElementById('close-detail').addEventListener('click', () => {
+            detailPanel.classList.remove('visible');
+            selectedModel = null;
+            renderCanvas();
+        });
+
+        searchInput.addEventListener('input', renderModelList);
+
+        showDjangoCheckbox.addEventListener('change', fetchSchema);
+
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            transform.scale = Math.min(transform.scale * 1.2, 3);
+            renderCanvas();
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            transform.scale = Math.max(transform.scale / 1.2, 0.3);
+            renderCanvas();
+        });
+
+        document.getElementById('fit-view').addEventListener('click', () => {
+            transform = { x: 0, y: 0, scale: 1 };
+            renderCanvas();
+        });
+
+        // Canvas pan
+        let isPanning = false;
+        let panStart = { x: 0, y: 0 };
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.target === canvas || e.target.tagName === 'svg') {
+                isPanning = true;
+                panStart = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                transform.x = e.clientX - panStart.x;
+                transform.y = e.clientY - panStart.y;
+                renderCanvas();
+            } else if (isDragging && dragTarget) {
+                nodePositions[dragTarget] = {
+                    x: (e.clientX - transform.x) / transform.scale - dragOffset.x,
+                    y: (e.clientY - transform.y) / transform.scale - dragOffset.y
+                };
+                renderCanvas();
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isPanning = false;
+            isDragging = false;
+            dragTarget = null;
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            transform.scale = Math.max(0.3, Math.min(3, transform.scale * delta));
+            renderCanvas();
+        });
+
+        // Initial load
+        fetchSchema();
+    </script>
+</body>
+</html>
