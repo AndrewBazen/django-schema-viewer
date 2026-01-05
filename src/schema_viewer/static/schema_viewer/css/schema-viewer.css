@@ -293,14 +293,22 @@ body {
 }
 
 /* === Model Node Styles === */
+/* Reset any browser defaults inside foreignObject */
+foreignObject, foreignObject * {
+    margin: 0;
+    padding: 0;
+}
+
 .model-node {
-    position: absolute;
+    display: block;
     background: var(--color-bg-secondary);
     border: 2px solid var(--color-border);
     border-radius: 8px;
-    min-width: 200px;
+    width: 220px;
+    box-sizing: border-box;
     cursor: move;
     user-select: none;
+    overflow: hidden;
 }
 
 .model-node:hover {

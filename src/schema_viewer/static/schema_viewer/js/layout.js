@@ -5,16 +5,27 @@
 
 const Layout = {
     config: {
-        rowWidth: 200,
-        horizontalGap: 100,
-        verticalGap: 50,
+        nodeWidth: 220,
+        horizontalGap: 150,
+        verticalGap: 100,
+    },
+
+    // Scoring weights for path selection
+    scoreWeights: {
+        length: 1,        // Cost per pixel of path length
+        turn: 50,         // Cost per 90-degree turn
+        crossing: 200,    // Cost per line crossing
+        nodeTouch: 500,   // Cost per node intersection
     },
 
     /**
-     * Calculate layout centered on the most connected node
+     * Calculate grid layout with intelligent row/column placement
+     * Rules:
+     * - Columns based on dependency depth
+     * - Multi-connected nodes share rows with nodes they connect to
+     * - Single-connected nodes can be placed flexibly
      */
-    calculateHierarchicalLayout(schema, nodeHeights, nodeWidths) {
-        // Use Map for O(1) node lookups and Set for connections
+    calculateHierarchicalLayout(schema, nodeHeights) {
         const nodeMap = new Map();
         const edges = new Set();
 
@@ -28,8 +39,10 @@ const Layout = {
                     modelName,
                     model,
                     height: nodeHeights[key] || 180,
-                    width: nodeWidths[key],
                     connections: new Set(),
+                    outgoing: new Set(),
+                    incoming: new Set(),
+                    hasSelfConnection: false,
                 });
             }
         }
@@ -39,21 +52,27 @@ const Layout = {
             for (const rel of node.model.relationships || []) {
                 if (rel.direction !== 'forward') continue;
                 const targetKey = `${rel.target_app}.${rel.target_model}`;
+
+                // Check for self-connection
+                if (targetKey === key) {
+                    node.hasSelfConnection = true;
+                    continue;
+                }
+
                 if (nodeMap.has(targetKey)) {
-                    // Use a string key for edge deduplication
                     const edgeKey = `${key}|${targetKey}|${rel.name}`;
                     if (!edges.has(edgeKey)) {
                         edges.add(edgeKey);
                     }
                     node.connections.add(targetKey);
-                    if (targetKey !== key) {
-                        nodeMap.get(targetKey).connections.add(key);
-                    }
+                    node.outgoing.add(targetKey);
+                    nodeMap.get(targetKey).connections.add(key);
+                    nodeMap.get(targetKey).incoming.add(key);
                 }
             }
         }
 
-        // Convert edge keys back to edge objects for rendering
+        // Convert edge keys to edge objects
         const edgeList = [...edges].map(edgeKey => {
             const [source, target, relName] = edgeKey.split('|');
             const sourceNode = nodeMap.get(source);
@@ -64,129 +83,222 @@ const Layout = {
             return { source, target, rel };
         });
 
-        // Find the hub node (most connections)
+        // Calculate columns (depth) for each node
+        const columns = new Map(); // node key -> column index
+        const processed = new Set();
+
+        // Base nodes (no outgoing) go in column 0
+        for (const [key, node] of nodeMap) {
+            if (node.outgoing.size === 0) {
+                columns.set(key, 0);
+                processed.add(key);
+            }
+        }
+
+        // If no base nodes, pick most referenced
+        if (processed.size === 0) {
+            const sorted = [...nodeMap.entries()]
+                .sort((a, b) => b[1].incoming.size - a[1].incoming.size);
+            if (sorted.length > 0) {
+                columns.set(sorted[0][0], 0);
+                processed.add(sorted[0][0]);
+            }
+        }
+
+        // Propagate columns
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const [key, node] of nodeMap) {
+                if (processed.has(key)) continue;
+
+                let allDepsProcessed = true;
+                let maxCol = -1;
+
+                for (const target of node.outgoing) {
+                    if (!columns.has(target)) {
+                        allDepsProcessed = false;
+                        break;
+                    }
+                    maxCol = Math.max(maxCol, columns.get(target));
+                }
+
+                if (allDepsProcessed && node.outgoing.size > 0) {
+                    columns.set(key, maxCol + 1);
+                    processed.add(key);
+                    changed = true;
+                }
+            }
+        }
+
+        // Remaining nodes (cycles/disconnected) go to column 0
+        for (const key of nodeMap.keys()) {
+            if (!columns.has(key)) {
+                columns.set(key, 0);
+            }
+        }
+
+        // Group nodes by column
+        const columnGroups = new Map();
+        for (const [key, col] of columns) {
+            if (!columnGroups.has(col)) {
+                columnGroups.set(col, []);
+            }
+            columnGroups.get(col).push(key);
+        }
+
+        const sortedCols = [...columnGroups.keys()].sort((a, b) => a - b);
+
+        // Assign rows using the grid rules
+        const rows = new Map(); // node key -> row index
+        const gridOccupied = new Set(); // "col,row" strings for occupied cells
+
+        // Helper: check if a grid cell is free
+        const isCellFree = (col, row) => !gridOccupied.has(`${col},${row}`);
+
+        // Helper: check if a node can be placed in a row
+        const canPlaceInRow = (nodeKey, row, col) => {
+            // First check: is this grid cell already taken?
+            if (!isCellFree(col, row)) return false;
+
+            const node = nodeMap.get(nodeKey);
+            const connectionCount = node.connections.size;
+
+            // Get nodes already in this row (from other columns)
+            const nodesInRow = [...rows.entries()]
+                .filter(([k, r]) => r === row)
+                .map(([k]) => k);
+
+            if (nodesInRow.length === 0) return true;
+
+            // Single-connection nodes: can go in row if their connection is
+            // in adjacent column OR not in this row
+            if (connectionCount <= 1) {
+                const connectedTo = [...node.connections][0];
+                if (!connectedTo) return true;
+
+                const connectedCol = columns.get(connectedTo);
+                const isAdjacent = Math.abs(connectedCol - col) === 1;
+                const connectedInThisRow = rows.get(connectedTo) === row;
+
+                // Can place if connection is adjacent OR connection is not in this row
+                return isAdjacent || !connectedInThisRow;
+            }
+
+            // Multi-connection nodes: can only be in row with nodes that connect to it
+            // or have self-connections
+            for (const otherKey of nodesInRow) {
+                const other = nodeMap.get(otherKey);
+                const connectedToThis = node.connections.has(otherKey);
+                const hasSelf = other.hasSelfConnection || node.hasSelfConnection;
+
+                if (!connectedToThis && !hasSelf) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
+        // Helper: find best row for a node
+        const findBestRow = (nodeKey, col) => {
+            const node = nodeMap.get(nodeKey);
+
+            // Try to find a row where connected nodes already exist
+            for (const connectedKey of node.connections) {
+                if (rows.has(connectedKey)) {
+                    const connectedRow = rows.get(connectedKey);
+                    if (canPlaceInRow(nodeKey, connectedRow, col)) {
+                        return connectedRow;
+                    }
+                }
+            }
+
+            // Find first available row
+            for (let r = 0; r < nodeMap.size; r++) {
+                if (canPlaceInRow(nodeKey, r, col)) {
+                    return r;
+                }
+            }
+
+            // Fallback: new row
+            return rows.size > 0 ? Math.max(...rows.values()) + 1 : 0;
+        };
+
+        // Process columns from left to right, placing nodes in rows
+        for (const col of sortedCols) {
+            const nodesInCol = columnGroups.get(col);
+
+            // Sort nodes: multi-connected first, then by connection count
+            nodesInCol.sort((a, b) => {
+                const aNode = nodeMap.get(a);
+                const bNode = nodeMap.get(b);
+                return bNode.connections.size - aNode.connections.size;
+            });
+
+            for (const nodeKey of nodesInCol) {
+                const row = findBestRow(nodeKey, col);
+                rows.set(nodeKey, row);
+                gridOccupied.add(`${col},${row}`);
+            }
+        }
+
+        // Compact rows (remove gaps)
+        const usedRows = new Set(rows.values());
+        const sortedUsedRows = [...usedRows].sort((a, b) => a - b);
+        const rowMapping = new Map();
+        sortedUsedRows.forEach((oldRow, newRow) => {
+            rowMapping.set(oldRow, newRow);
+        });
+
+        for (const [key, row] of rows) {
+            rows.set(key, rowMapping.get(row));
+        }
+
+        // Calculate positions from grid
+        const positions = new Map();
+        const { nodeWidth, horizontalGap, verticalGap } = this.config;
+
+        // Calculate row heights (max node height in each row)
+        const rowHeights = new Map();
+        for (const [key, row] of rows) {
+            const height = nodeHeights[key] || 180;
+            rowHeights.set(row, Math.max(rowHeights.get(row) || 0, height));
+        }
+
+        // Calculate Y positions for each row
+        const rowYPositions = new Map();
+        let currentY = 50;
+        const maxRow = Math.max(...rows.values());
+        for (let r = 0; r <= maxRow; r++) {
+            rowYPositions.set(r, currentY);
+            currentY += (rowHeights.get(r) || 180) + verticalGap;
+        }
+
+        // Calculate X positions for each column
+        const colXPositions = new Map();
+        let currentX = 50;
+        for (const col of sortedCols) {
+            colXPositions.set(col, currentX);
+            currentX += nodeWidth + horizontalGap;
+        }
+
+        // Set final positions
+        for (const [key, col] of columns) {
+            const row = rows.get(key);
+            positions.set(key, {
+                x: colXPositions.get(col),
+                y: rowYPositions.get(row),
+            });
+        }
+
+        // Find hub node for reference
         let hubNode = null;
         let maxConnections = -1;
         for (const [key, node] of nodeMap) {
             if (node.connections.size > maxConnections) {
                 maxConnections = node.connections.size;
                 hubNode = node;
-            }
-        }
-
-        // Categorize nodes by their relationship to the hub
-        const referenced = new Set();  // Hub references these (hub has FK to them)
-        const referencers = new Set(); // These reference the hub (they have FK to hub)
-
-        for (const { source, target } of edgeList) {
-            if (source === hubNode.key && target !== hubNode.key) {
-                referenced.add(target);
-            }
-            if (target === hubNode.key && source !== hubNode.key) {
-                referencers.add(source);
-            }
-        }
-
-        // Remove nodes that are both referenced and referencers from referencers
-        for (const key of referenced) {
-            referencers.delete(key);
-        }
-
-        // Remaining nodes (not hub, not directly connected)
-        const directlyConnected = new Set([...referenced, ...referencers]);
-        const remaining = [...nodeMap.keys()].filter(k =>
-            k !== hubNode.key && !directlyConnected.has(k)
-        );
-
-        // Calculate positions
-        const positions = new Map();
-        const { rowWidth, horizontalGap, verticalGap } = this.config;
-
-        const referencedList = [...referenced];
-        const referencersList = [...referencers];
-
-        // Row 0: Nodes that the hub references (parent tables)
-        let row0Width = referencedList.length * rowWidth + (referencedList.length - 1) * horizontalGap;
-        let startX = 50;
-        let currentY = 50;
-
-        referencedList.forEach((key, idx) => {
-            positions.set(key, {
-                x: startX + idx * (nodeWidth + horizontalGap),
-                y: currentY,
-            });
-        });
-
-        // Calculate row 0 height
-        const row0Height = referencedList.length > 0
-            ? Math.max(...referencedList.map(k => nodeHeights[k] || 180))
-            : 0;
-
-        // Row 1: The hub node (centered under referenced nodes)
-        currentY += row0Height > 0 ? row0Height + verticalGap : 0;
-
-        // Center the hub
-        const hubX = referencedList.length > 0
-            ? startX + (row0Width - nodeWidth) / 2
-            : startX + horizontalGap;
-
-        positions.set(hubNode.key, {
-            x: hubX,
-            y: currentY,
-        });
-
-        const hubHeight = nodeHeights[hubNode.key] || 180;
-
-        // Row 2: Nodes that reference the hub (child tables)
-        currentY += hubHeight + verticalGap;
-
-        // Split referencers to left and right of center for better distribution
-        const leftReferencers = referencersList.slice(0, Math.ceil(referencersList.length / 2));
-        const rightReferencers = referencersList.slice(Math.ceil(referencersList.length / 2));
-
-        // Position left referencers
-        leftReferencers.forEach((key, idx) => {
-            positions.set(key, {
-                x: hubX - (leftReferencers.length - idx) * (nodeWidth + horizontalGap),
-                y: currentY,
-            });
-        });
-
-        // Position right referencers
-        rightReferencers.forEach((key, idx) => {
-            positions.set(key, {
-                x: hubX + (idx + 1) * (nodeWidth + horizontalGap),
-                y: currentY,
-            });
-        });
-
-        // Row 2 height
-        const row2Height = referencersList.length > 0
-            ? Math.max(...referencersList.map(k => nodeHeights[k] || 180))
-            : 0;
-
-        // Row 3: Remaining nodes
-        if (remaining.length > 0) {
-            currentY += row2Height > 0 ? row2Height + verticalGap : hubHeight + verticalGap;
-
-            remaining.forEach((key, idx) => {
-                positions.set(key, {
-                    x: startX + idx * (nodeWidth + horizontalGap),
-                    y: currentY,
-                });
-            });
-        }
-
-        // Normalize positions (shift everything so nothing is negative)
-        let minX = Infinity;
-        for (const pos of positions.values()) {
-            minX = Math.min(minX, pos.x);
-        }
-
-        if (minX < 50) {
-            const shiftX = 50 - minX;
-            for (const pos of positions.values()) {
-                pos.x += shiftX;
             }
         }
 
@@ -269,6 +381,164 @@ const Layout = {
     },
 
     /**
+     * Count the number of turns (direction changes) in a path
+     * @param {Array} points - Array of {x, y} points
+     * @returns {number} Number of turns
+     */
+    countTurns(points) {
+        if (points.length < 3) return 0;
+
+        let turns = 0;
+        for (let i = 1; i < points.length - 1; i++) {
+            const prev = points[i - 1];
+            const curr = points[i];
+            const next = points[i + 1];
+
+            // Check if direction changes
+            const dx1 = curr.x - prev.x;
+            const dy1 = curr.y - prev.y;
+            const dx2 = next.x - curr.x;
+            const dy2 = next.y - curr.y;
+
+            // If horizontal becomes vertical or vice versa, it's a turn
+            const wasHorizontal = Math.abs(dx1) > Math.abs(dy1);
+            const nowHorizontal = Math.abs(dx2) > Math.abs(dy2);
+
+            if (wasHorizontal !== nowHorizontal) {
+                turns++;
+            }
+        }
+        return turns;
+    },
+
+    /**
+     * Check if two line segments intersect
+     * @param {Object} p1 - Start of segment 1 {x, y}
+     * @param {Object} p2 - End of segment 1 {x, y}
+     * @param {Object} p3 - Start of segment 2 {x, y}
+     * @param {Object} p4 - End of segment 2 {x, y}
+     * @returns {boolean} True if segments intersect
+     */
+    segmentsIntersect(p1, p2, p3, p4) {
+        // Using cross product method
+        const ccw = (A, B, C) => {
+            return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+        };
+
+        // Check if segments share an endpoint (not a real crossing)
+        const samePoint = (a, b) => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
+        if (samePoint(p1, p3) || samePoint(p1, p4) || samePoint(p2, p3) || samePoint(p2, p4)) {
+            return false;
+        }
+
+        return ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
+    },
+
+    /**
+     * Count how many times a path crosses existing routes
+     * @param {Array} points - The candidate path points
+     * @param {Array} existingRoutes - Array of already-placed routes
+     * @returns {number} Number of crossings
+     */
+    countCrossings(points, existingRoutes) {
+        let crossings = 0;
+
+        // For each segment in the candidate path
+        for (let i = 0; i < points.length - 1; i++) {
+            const p1 = points[i];
+            const p2 = points[i + 1];
+
+            // Check against each segment in existing routes
+            for (const route of existingRoutes) {
+                for (let j = 0; j < route.points.length - 1; j++) {
+                    const p3 = route.points[j];
+                    const p4 = route.points[j + 1];
+
+                    if (this.segmentsIntersect(p1, p2, p3, p4)) {
+                        crossings++;
+                    }
+                }
+            }
+        }
+
+        return crossings;
+    },
+
+    /**
+     * Calculate path length
+     * @param {Array} points - Array of {x, y} points
+     * @returns {number} Total path length
+     */
+    calculatePathLength(points) {
+        let length = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            const dx = points[i + 1].x - points[i].x;
+            const dy = points[i + 1].y - points[i].y;
+            length += Math.abs(dx) + Math.abs(dy); // Manhattan distance for orthogonal paths
+        }
+        return length;
+    },
+
+    /**
+     * Count how many nodes a path passes through
+     * @param {Array} points - The candidate path points
+     * @param {Map} nodeBounds - Map of node keys to bounds
+     * @param {Set} excludeKeys - Nodes to exclude (source and target)
+     * @returns {number} Number of node intersections
+     */
+    countNodeTouches(points, nodeBounds, excludeKeys) {
+        let touches = 0;
+
+        for (const [key, bounds] of nodeBounds) {
+            if (excludeKeys.has(key)) continue;
+
+            // Check each segment of the path
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+
+                // Check if segment intersects this node's bounds
+                const minX = Math.min(p1.x, p2.x);
+                const maxX = Math.max(p1.x, p2.x);
+                const minY = Math.min(p1.y, p2.y);
+                const maxY = Math.max(p1.y, p2.y);
+
+                // Check for overlap with node bounds
+                if (maxX > bounds.left && minX < bounds.right &&
+                    maxY > bounds.top && minY < bounds.bottom) {
+                    touches++;
+                    break; // Only count each node once per path
+                }
+            }
+        }
+
+        return touches;
+    },
+
+    /**
+     * Score a path based on length, turns, crossings, and node touches
+     * Lower score is better
+     * @param {Array} points - The path points
+     * @param {Array} existingRoutes - Already-placed routes for crossing detection
+     * @param {Map} nodeBounds - Map of node keys to bounds
+     * @param {Set} excludeKeys - Nodes to exclude from touch detection
+     * @returns {number} The path score
+     */
+    scorePath(points, existingRoutes, nodeBounds, excludeKeys) {
+        const length = this.calculatePathLength(points);
+        const turns = this.countTurns(points);
+        const crossings = this.countCrossings(points, existingRoutes);
+        const nodeTouches = nodeBounds ? this.countNodeTouches(points, nodeBounds, excludeKeys) : 0;
+
+        return (
+            length * this.scoreWeights.length +
+            turns * this.scoreWeights.turn +
+            crossings * this.scoreWeights.crossing +
+            nodeTouches * this.scoreWeights.nodeTouch
+        );
+    },
+
+    /**
      * Calculate orthogonal edge routes
      * @param {Map} positions - Map of node keys to {x, y} positions
      * @param {Array} edges - Array of edge objects
@@ -278,6 +548,10 @@ const Layout = {
     calculateEdgeRoutes(positions, edges, nodeHeights, nodeMap) {
         const routes = [];
         const { nodeWidth } = this.config;
+
+        // Track connection offsets per target node to spread out overlapping markers
+        const connectionOffsets = new Map();
+        const offsetStep = 12; // Pixels between overlapping connections
 
         // Build bounding boxes as a Map
         const nodeBounds = new Map();
@@ -295,6 +569,9 @@ const Layout = {
 
         // Process each edge - connect at specific field positions
         for (const edge of edges) {
+            // Skip self-referential edges - they're rendered separately in canvas.js
+            if (edge.source === edge.target) continue;
+
             const sBounds = nodeBounds.get(edge.source);
             const tBounds = nodeBounds.get(edge.target);
             if (!sBounds || !tBounds) continue;
@@ -307,6 +584,17 @@ const Layout = {
             const sourceFieldY = sBounds.top + this.getFieldYOffset(sourceNode.model, edge.rel.name);
             const targetFieldY = tBounds.top + this.getPkYOffset(targetNode.model);
 
+            // Apply offset to spread out overlapping connections
+            // Use a simple counter per target node to offset each incoming connection
+            const targetOffsetKey = `${edge.target}:target`;
+            const targetCount = connectionOffsets.get(targetOffsetKey) || 0;
+            connectionOffsets.set(targetOffsetKey, targetCount + 1);
+
+            // Count total incoming edges to this target (excluding self-referential)
+            const totalIncoming = edges.filter(e => e.target === edge.target && e.source !== e.target).length;
+            const targetCenterOffset = (totalIncoming - 1) / 2;
+            const targetOffset = (targetCount - targetCenterOffset) * offsetStep;
+
             const excludeKeys = new Set([edge.source, edge.target]);
 
             // Find all obstacles between source and target
@@ -317,7 +605,7 @@ const Layout = {
             }
 
             const startY = sourceFieldY;
-            const endY = targetFieldY;
+            const endY = targetFieldY + targetOffset;
 
             // Calculate the leftmost and rightmost edges of all nodes
             let leftmostEdge = Math.min(sBounds.left, tBounds.left);
@@ -351,104 +639,114 @@ const Layout = {
                 );
             };
 
-            // Determine the natural side preference based on relative positions
-            const sourceIsLeftOfTarget = sBounds.centerX < tBounds.centerX;
-            const sourceIsAboveTarget = sBounds.centerY < tBounds.centerY;
-
-            // Build routing options - prioritize natural directions
+            // Generate all possible route options
+            // Try all 4 side combinations: source left/right × target left/right
+            // Constraint: paths must exit in the direction of the side they connect to
+            // - Right side exit must go rightward (midX >= srcX)
+            // - Left side exit must go leftward (midX <= srcX)
+            // - Right side entry must come from right (midX >= tgtX)
+            // - Left side entry must come from left (midX <= tgtX)
             const routeOptions = [];
 
-            // Define side combinations with priority based on relative positions
-            const sideCombos = [];
+            const sideCombos = [
+                { srcX: sBounds.right, tgtX: tBounds.left, srcDir: 'right', tgtDir: 'left' },
+                { srcX: sBounds.right, tgtX: tBounds.right, srcDir: 'right', tgtDir: 'right' },
+                { srcX: sBounds.left, tgtX: tBounds.left, srcDir: 'left', tgtDir: 'left' },
+                { srcX: sBounds.left, tgtX: tBounds.right, srcDir: 'left', tgtDir: 'right' },
+            ];
 
-            if (sourceIsLeftOfTarget) {
-                // Source is left of target: prefer source-right to target-left
-                sideCombos.push({ srcX: sBounds.right, tgtX: tBounds.left, priority: 0 });
-                sideCombos.push({ srcX: sBounds.right, tgtX: tBounds.right, priority: 1 });
-                sideCombos.push({ srcX: sBounds.left, tgtX: tBounds.left, priority: 2 });
-                sideCombos.push({ srcX: sBounds.left, tgtX: tBounds.right, priority: 3 });
-            } else {
-                // Source is right of target: prefer source-left to target-right
-                sideCombos.push({ srcX: sBounds.left, tgtX: tBounds.right, priority: 0 });
-                sideCombos.push({ srcX: sBounds.left, tgtX: tBounds.left, priority: 1 });
-                sideCombos.push({ srcX: sBounds.right, tgtX: tBounds.right, priority: 2 });
-                sideCombos.push({ srcX: sBounds.right, tgtX: tBounds.left, priority: 3 });
-            }
+            for (const { srcX, tgtX, srcDir, tgtDir } of sideCombos) {
+                // Helper to check if midX is valid for the source direction
+                const validForSource = (midX) => {
+                    return srcDir === 'right' ? midX >= srcX : midX <= srcX;
+                };
 
-            for (const { srcX, tgtX, priority } of sideCombos) {
-                // Route 1: Direct path through midpoint
+                // Helper to check if midX is valid for the target direction
+                const validForTarget = (midX) => {
+                    return tgtDir === 'left' ? midX <= tgtX : midX >= tgtX;
+                };
+
+                // Route 1: Direct path through midpoint (only if directions allow)
+                // Ensure minimum horizontal distance to avoid degenerate vertical-only paths
+                const minHorizontalDist = 20;
                 const midX = (srcX + tgtX) / 2;
-                if (!horizontalSegmentBlocked(srcX, midX, startY) &&
+                const hasHorizontalSpace = Math.abs(srcX - midX) >= minHorizontalDist &&
+                                           Math.abs(midX - tgtX) >= minHorizontalDist;
+                if (hasHorizontalSpace && validForSource(midX) && validForTarget(midX) &&
+                    !horizontalSegmentBlocked(srcX, midX, startY) &&
                     !verticalSegmentBlocked(startY, endY, midX) &&
                     !horizontalSegmentBlocked(midX, tgtX, endY)) {
-                    const pathLength = Math.abs(srcX - midX) + Math.abs(startY - endY) + Math.abs(midX - tgtX);
                     routeOptions.push({
                         points: this.buildPathPoints(srcX, startY, tgtX, endY, midX),
-                        length: pathLength + priority * 10, // Add priority penalty
-                        srcX, tgtX,
                     });
                 }
 
-                // Route 2: Go around via left side
-                if (!horizontalSegmentBlocked(srcX, routeLeftX, startY) &&
+                // Route 2: Go around via left side (only valid for left-exiting sources)
+                if (srcDir === 'left' && tgtDir === 'left' &&
+                    !horizontalSegmentBlocked(srcX, routeLeftX, startY) &&
                     !verticalSegmentBlocked(startY, endY, routeLeftX) &&
                     !horizontalSegmentBlocked(routeLeftX, tgtX, endY)) {
-                    const pathLength = Math.abs(srcX - routeLeftX) + Math.abs(startY - endY) + Math.abs(routeLeftX - tgtX);
                     routeOptions.push({
                         points: this.buildPathPoints(srcX, startY, tgtX, endY, routeLeftX),
-                        length: pathLength + priority * 10,
-                        srcX, tgtX,
                     });
                 }
 
-                // Route 3: Go around via right side
-                if (!horizontalSegmentBlocked(srcX, routeRightX, startY) &&
+                // Route 3: Go around via right side (only valid for right-exiting sources)
+                if (srcDir === 'right' && tgtDir === 'right' &&
+                    !horizontalSegmentBlocked(srcX, routeRightX, startY) &&
                     !verticalSegmentBlocked(startY, endY, routeRightX) &&
                     !horizontalSegmentBlocked(routeRightX, tgtX, endY)) {
-                    const pathLength = Math.abs(srcX - routeRightX) + Math.abs(startY - endY) + Math.abs(routeRightX - tgtX);
                     routeOptions.push({
                         points: this.buildPathPoints(srcX, startY, tgtX, endY, routeRightX),
-                        length: pathLength + priority * 10,
-                        srcX, tgtX,
                     });
                 }
 
-                // Route 4: Vertical-first routing (go up/down first, then horizontal)
-                // This helps when nodes are on the same horizontal line
-                const goAbove = Math.min(sBounds.top, tBounds.top) - 30;
-                const goBelow = Math.max(sBounds.bottom, tBounds.bottom) + 30;
+                // Route 4: Simple L-shaped path going directly toward target
+                // Always add this option and let scoring penalize if it touches nodes
+                const jogOutX = srcDir === 'right' ? srcX + 30 : srcX - 30;
+                routeOptions.push({
+                    points: [
+                        { x: srcX, y: startY },
+                        { x: jogOutX, y: startY },
+                        { x: jogOutX, y: endY },
+                        { x: tgtX, y: endY },
+                    ],
+                });
 
-                for (const vertY of [goAbove, goBelow]) {
-                    if (!verticalSegmentBlocked(startY, vertY, srcX) &&
-                        !horizontalSegmentBlocked(srcX, tgtX, vertY) &&
-                        !verticalSegmentBlocked(vertY, endY, tgtX)) {
-                        const pathLength = Math.abs(startY - vertY) + Math.abs(srcX - tgtX) + Math.abs(vertY - endY);
-                        routeOptions.push({
-                            points: [
-                                { x: srcX, y: startY },
-                                { x: srcX, y: vertY },
-                                { x: tgtX, y: vertY },
-                                { x: tgtX, y: endY },
-                            ],
-                            length: pathLength + priority * 10 + 5, // Slight penalty for vertical-first
-                            srcX, tgtX,
-                        });
-                    }
+                // Route 5: Go wide around all nodes via the outer edges
+                const wideX = srcDir === 'right' ? routeRightX : routeLeftX;
+                routeOptions.push({
+                    points: [
+                        { x: srcX, y: startY },
+                        { x: wideX, y: startY },
+                        { x: wideX, y: endY },
+                        { x: tgtX, y: endY },
+                    ],
+                });
+            }
+
+            // Score each route option considering existing routes and node overlaps
+            let bestRoute = null;
+            let bestScore = Infinity;
+
+            for (const option of routeOptions) {
+                const score = this.scorePath(option.points, routes, nodeBounds, excludeKeys);
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestRoute = option.points;
                 }
             }
 
-            // Pick the shortest route
-            routeOptions.sort((a, b) => a.length - b.length);
-
-            let points;
-            if (routeOptions.length > 0) {
-                points = routeOptions[0].points;
-            } else {
-                // Fallback: go wide right
-                points = this.buildPathPoints(sBounds.right, startY, tBounds.right, endY, routeRightX);
+            // Fallback if no valid routes found - use routeRightX to go around
+            if (!bestRoute) {
+                bestRoute = this.buildPathPoints(
+                    sBounds.right, startY,
+                    tBounds.right, endY,
+                    routeRightX
+                );
             }
 
-            routes.push({ edge, points });
+            routes.push({ edge, points: bestRoute });
         }
 
         return routes;
@@ -456,22 +754,30 @@ const Layout = {
 
     /**
      * Build path points for a horizontal-vertical-horizontal route
+     * Always ensures horizontal segments at start and end for proper marker display
      */
     buildPathPoints(srcX, srcY, tgtX, tgtY, midX) {
-        // Remove redundant points where coordinates match
         const points = [{ x: srcX, y: srcY }];
 
-        if (Math.abs(srcX - midX) > 1) {
+        // Always add the horizontal segment from source to midX
+        // (even if small, this ensures markers have a direction)
+        if (srcX !== midX) {
             points.push({ x: midX, y: srcY });
         }
 
+        // Add vertical segment if Y positions differ
         if (Math.abs(srcY - tgtY) > 1) {
             points.push({ x: midX, y: tgtY });
         }
 
-        if (Math.abs(midX - tgtX) > 1) {
+        // Always add the horizontal segment from midX to target
+        if (midX !== tgtX) {
             points.push({ x: tgtX, y: tgtY });
-        } else if (points[points.length - 1].x !== tgtX || points[points.length - 1].y !== tgtY) {
+        }
+
+        // Ensure we have at least the end point
+        const lastPoint = points[points.length - 1];
+        if (lastPoint.x !== tgtX || lastPoint.y !== tgtY) {
             points.push({ x: tgtX, y: tgtY });
         }
 
