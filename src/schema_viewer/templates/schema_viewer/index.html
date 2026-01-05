@@ -1,356 +1,11 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Django Schema Viewer</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: #0f172a;
-            color: #e2e8f0;
-            height: 100vh;
-            overflow: hidden;
-        }
-
-        .container {
-            display: flex;
-            height: 100vh;
-        }
-
-        /* Sidebar */
-        .sidebar {
-            width: 280px;
-            background: #1e293b;
-            border-right: 1px solid #334155;
-            display: flex;
-            flex-direction: column;
-            flex-shrink: 0;
-        }
-
-        .sidebar-header {
-            padding: 16px;
-            border-bottom: 1px solid #334155;
-        }
-
-        .sidebar-header h1 {
-            font-size: 18px;
-            font-weight: 600;
-            color: #f8fafc;
-        }
-
-        .search-box {
-            padding: 12px 16px;
-            border-bottom: 1px solid #334155;
-        }
-
-        .search-box input {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #334155;
-            border-radius: 6px;
-            background: #0f172a;
-            color: #e2e8f0;
-            font-size: 14px;
-        }
-
-        .search-box input:focus {
-            outline: none;
-            border-color: #3b82f6;
-        }
-
-        .model-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 8px;
-        }
-
-        .app-group {
-            margin-bottom: 8px;
-        }
-
-        .app-header {
-            padding: 8px 12px;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: #94a3b8;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .app-header:hover {
-            color: #e2e8f0;
-        }
-
-        .app-header .arrow {
-            transition: transform 0.2s;
-        }
-
-        .app-header.collapsed .arrow {
-            transform: rotate(-90deg);
-        }
-
-        .model-item {
-            padding: 8px 12px 8px 28px;
-            font-size: 14px;
-            cursor: pointer;
-            border-radius: 4px;
-            color: #cbd5e1;
-        }
-
-        .model-item:hover {
-            background: #334155;
-            color: #f8fafc;
-        }
-
-        .model-item.selected {
-            background: #3b82f6;
-            color: #ffffff;
-        }
-
-        /* Main canvas area */
-        .main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .toolbar {
-            padding: 12px 16px;
-            background: #1e293b;
-            border-bottom: 1px solid #334155;
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-
-        .toolbar button {
-            padding: 8px 16px;
-            border: 1px solid #334155;
-            border-radius: 6px;
-            background: #0f172a;
-            color: #e2e8f0;
-            font-size: 14px;
-            cursor: pointer;
-        }
-
-        .toolbar button:hover {
-            background: #334155;
-        }
-
-        .toolbar label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
-            color: #94a3b8;
-        }
-
-        .canvas-container {
-            flex: 1;
-            position: relative;
-            overflow: hidden;
-        }
-
-        #canvas {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* Detail panel */
-        .detail-panel {
-            width: 350px;
-            background: #1e293b;
-            border-left: 1px solid #334155;
-            overflow-y: auto;
-            display: none;
-            flex-shrink: 0;
-        }
-
-        .detail-panel.visible {
-            display: block;
-        }
-
-        .detail-header {
-            padding: 16px;
-            border-bottom: 1px solid #334155;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .detail-header h2 {
-            font-size: 16px;
-            font-weight: 600;
-        }
-
-        .detail-header .close-btn {
-            background: none;
-            border: none;
-            color: #94a3b8;
-            cursor: pointer;
-            font-size: 20px;
-        }
-
-        .detail-section {
-            padding: 16px;
-            border-bottom: 1px solid #334155;
-        }
-
-        .detail-section h3 {
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: #94a3b8;
-            margin-bottom: 12px;
-        }
-
-        .field-item {
-            padding: 8px 0;
-            border-bottom: 1px solid #334155;
-        }
-
-        .field-item:last-child {
-            border-bottom: none;
-        }
-
-        .field-name {
-            font-weight: 500;
-            color: #f8fafc;
-        }
-
-        .field-type {
-            font-size: 12px;
-            color: #94a3b8;
-            font-family: monospace;
-        }
-
-        .field-badges {
-            display: flex;
-            gap: 4px;
-            margin-top: 4px;
-            flex-wrap: wrap;
-        }
-
-        .badge {
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 4px;
-            background: #334155;
-            color: #94a3b8;
-        }
-
-        .badge.primary {
-            background: #3b82f6;
-            color: #ffffff;
-        }
-
-        .badge.unique {
-            background: #8b5cf6;
-            color: #ffffff;
-        }
-
-        .badge.nullable {
-            background: #f59e0b;
-            color: #000000;
-        }
-
-        .badge.indexed {
-            background: #10b981;
-            color: #ffffff;
-        }
-
-        /* Loading state */
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            color: #94a3b8;
-        }
-
-        /* Node styles for canvas */
-        .model-node {
-            position: absolute;
-            background: #1e293b;
-            border: 2px solid #334155;
-            border-radius: 8px;
-            min-width: 200px;
-            cursor: move;
-            user-select: none;
-        }
-
-        .model-node:hover {
-            border-color: #3b82f6;
-        }
-
-        .model-node.selected {
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
-        }
-
-        .model-node-header {
-            padding: 12px;
-            background: #334155;
-            border-radius: 6px 6px 0 0;
-            font-weight: 600;
-            font-size: 14px;
-        }
-
-        .model-node-app {
-            font-size: 10px;
-            color: #94a3b8;
-            font-weight: normal;
-        }
-
-        .model-node-fields {
-            padding: 8px 12px;
-            font-size: 12px;
-        }
-
-        .model-node-field {
-            padding: 4px 0;
-            display: flex;
-            justify-content: space-between;
-            color: #cbd5e1;
-        }
-
-        .model-node-field-type {
-            color: #94a3b8;
-            font-family: monospace;
-            font-size: 11px;
-        }
-
-        /* Relationship lines */
-        .relationship-line {
-            stroke: #3b82f6;
-            stroke-width: 2;
-            fill: none;
-        }
-
-        .relationship-line.foreign-key {
-            stroke: #3b82f6;
-        }
-
-        .relationship-line.one-to-one {
-            stroke: #8b5cf6;
-        }
-
-        .relationship-line.many-to-many {
-            stroke: #10b981;
-            stroke-dasharray: 5, 5;
-        }
-    </style>
+    <link rel="stylesheet" href="{% static 'schema_viewer/css/schema-viewer.css' %}">
 </head>
 <body>
     <div class="container">
@@ -371,6 +26,7 @@
                 <button id="zoom-in">Zoom In</button>
                 <button id="zoom-out">Zoom Out</button>
                 <button id="fit-view">Fit View</button>
+                <button id="re-layout">Re-layout</button>
                 <label>
                     <input type="checkbox" id="show-django" />
                     Show Django models
@@ -378,6 +34,22 @@
             </div>
             <div class="canvas-container">
                 <svg id="canvas"></svg>
+                <!-- Legend -->
+                <div class="legend">
+                    <div class="legend-title">Relationships</div>
+                    <div class="legend-item">
+                        <div class="legend-line fk"></div>
+                        <span>Foreign Key (many → one)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-line o2o"></div>
+                        <span>One-to-One</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-line m2m"></div>
+                        <span>Many-to-Many</span>
+                    </div>
+                </div>
             </div>
         </main>
 
@@ -392,12 +64,16 @@
         </aside>
     </div>
 
+    <script src="{% static 'schema_viewer/js/layout.js' %}"></script>
     <script>
         // State
         let schema = null;
         let selectedModel = null;
         let transform = { x: 0, y: 0, scale: 1 };
-        let nodePositions = {};
+        let nodePositions = new Map();
+        let nodeHeights = {};
+        let layoutData = null;
+        let edgeRoutes = [];
         let isDragging = false;
         let dragTarget = null;
         let dragOffset = { x: 0, y: 0 };
@@ -411,13 +87,81 @@
         const searchInput = document.getElementById('search');
         const showDjangoCheckbox = document.getElementById('show-django');
 
+        // SVG marker definitions for ER notation
+        // Using orient="auto" - markers align with path direction
+        // Crow's foot: drawn pointing left (backward relative to path direction)
+        // Double bar: drawn at the marker end
+        const markerDefs = `
+            <defs>
+                <!-- FK markers (blue): crow's foot at source (many), double bar at target (one) -->
+                <marker id="marker-many-fk" viewBox="0 0 12 12" refX="12" refY="6"
+                        markerWidth="10" markerHeight="10" orient="auto">
+                    <path d="M 12 6 L 0 0 M 12 6 L 0 12" stroke="#3b82f6" stroke-width="2" fill="none"/>
+                </marker>
+                <marker id="marker-one-fk" viewBox="0 0 10 12" refX="0" refY="6"
+                        markerWidth="8" markerHeight="10" orient="auto">
+                    <line x1="1" y1="0" x2="1" y2="12" stroke="#3b82f6" stroke-width="2"/>
+                    <line x1="6" y1="0" x2="6" y2="12" stroke="#3b82f6" stroke-width="2"/>
+                </marker>
+
+                <!-- O2O markers (purple): single bar at source, double bar at target -->
+                <marker id="marker-one-o2o-start" viewBox="0 0 10 12" refX="6" refY="6"
+                        markerWidth="8" markerHeight="10" orient="auto">
+                    <line x1="0" y1="0" x2="0" y2="12" stroke="#8b5cf6" stroke-width="2"/>
+                </marker>
+                <marker id="marker-one-o2o-end" viewBox="0 0 10 12" refX="0" refY="6"
+                        markerWidth="8" markerHeight="10" orient="auto">
+                    <line x1="1" y1="0" x2="1" y2="12" stroke="#8b5cf6" stroke-width="2"/>
+                    <line x1="6" y1="0" x2="6" y2="12" stroke="#8b5cf6" stroke-width="2"/>
+                </marker>
+
+                <!-- M2M markers (green): crow's foot at both ends -->
+                <marker id="marker-many-m2m-start" viewBox="0 0 12 12" refX="12" refY="6"
+                        markerWidth="10" markerHeight="10" orient="auto">
+                    <path d="M 12 6 L 0 0 M 12 6 L 0 12" stroke="#10b981" stroke-width="2" fill="none"/>
+                </marker>
+                <marker id="marker-many-m2m-end" viewBox="0 0 12 12" refX="0" refY="6"
+                        markerWidth="10" markerHeight="10" orient="auto">
+                    <path d="M 0 6 L 12 0 M 0 6 L 12 12" stroke="#10b981" stroke-width="2" fill="none"/>
+                </marker>
+            </defs>
+        `;
+
         // Fetch schema data
         async function fetchSchema() {
             const excludeDjango = !showDjangoCheckbox.checked;
             const response = await fetch(`api/schema/?exclude_django=${excludeDjango}`);
             schema = await response.json();
             renderModelList();
+            calculateLayout();
             renderCanvas();
+        }
+
+        // Calculate node heights based on field count
+        function calculateNodeHeights() {
+            nodeHeights = {};
+            for (const [appLabel, appData] of Object.entries(schema.apps)) {
+                for (const [modelName, model] of Object.entries(appData.models)) {
+                    const key = `${appLabel}.${modelName}`;
+                    const fields = (model.fields || []).slice(0, 5);
+                    const hasMore = model.fields?.length > 5;
+                    nodeHeights[key] = 50 + 16 + (fields.length * 28) + (hasMore ? 24 : 0);
+                }
+            }
+        }
+
+        // Calculate hierarchical layout
+        function calculateLayout() {
+            calculateNodeHeights();
+            layoutData = Layout.calculateHierarchicalLayout(schema, nodeHeights);
+            nodePositions = layoutData.positions;
+            // Calculate edge routes
+            edgeRoutes = Layout.calculateEdgeRoutes(
+                nodePositions,
+                layoutData.edges,
+                nodeHeights,
+                layoutData.nodeMap
+            );
         }
 
         // Render the model list in sidebar
@@ -467,67 +211,85 @@
             });
         }
 
-        // Calculate node positions using a simple grid layout
-        function calculatePositions() {
-            const startX = 50;
-            const startY = 50;
-            const nodeWidth = 220;
-            const nodeHeight = 150;
-            const gapX = 100;
-            const gapY = 50;
-            const nodesPerRow = 4;
-
-            let index = 0;
-            for (const [appLabel, appData] of Object.entries(schema.apps)) {
-                for (const modelName of Object.keys(appData.models)) {
-                    const key = `${appLabel}.${modelName}`;
-                    if (!nodePositions[key]) {
-                        const row = Math.floor(index / nodesPerRow);
-                        const col = index % nodesPerRow;
-                        nodePositions[key] = {
-                            x: startX + col * (nodeWidth + gapX),
-                            y: startY + row * (nodeHeight + gapY)
-                        };
-                    }
-                    index++;
-                }
-            }
-        }
-
         // Render the canvas with nodes and relationships
         function renderCanvas() {
-            calculatePositions();
-
             let nodesHtml = '';
             let edgesHtml = '';
 
-            // Draw edges first (so they're behind nodes)
+            // Draw edges using precalculated routes
+            for (const route of edgeRoutes) {
+                const { edge, points } = route;
+                const rel = edge.rel;
+                const relClass = rel.type.replace('_', '-');
+                const pathD = Layout.pathToSvgRounded(points);
+
+                // Determine markers based on relationship type
+                let startMarker = '';
+                let endMarker = '';
+
+                if (rel.type === 'foreign_key') {
+                    startMarker = 'url(#marker-many-fk)';
+                    endMarker = 'url(#marker-one-fk)';
+                } else if (rel.type === 'one_to_one') {
+                    startMarker = 'url(#marker-one-o2o-start)';
+                    endMarker = 'url(#marker-one-o2o-end)';
+                } else if (rel.type === 'many_to_many') {
+                    startMarker = 'url(#marker-many-m2m-start)';
+                    endMarker = 'url(#marker-many-m2m-end)';
+                }
+
+                edgesHtml += `
+                    <path class="relationship-line ${relClass}"
+                          d="${pathD}"
+                          marker-start="${startMarker}"
+                          marker-end="${endMarker}"
+                          data-source="${edge.source}"
+                          data-target="${edge.target}"
+                          data-rel-name="${rel.name}"
+                          data-rel-type="${rel.type}">
+                        <title>${rel.name}: ${edge.source} → ${edge.target}</title>
+                    </path>
+                `;
+            }
+
+            // Also draw self-referential relationships (not in layoutData.edges)
             for (const [appLabel, appData] of Object.entries(schema.apps)) {
                 for (const [modelName, model] of Object.entries(appData.models)) {
                     const sourceKey = `${appLabel}.${modelName}`;
-                    const sourcePos = nodePositions[sourceKey];
+                    const sourcePos = nodePositions.get(sourceKey);
+                    if (!sourcePos) continue;
 
                     for (const rel of model.relationships || []) {
                         if (rel.direction !== 'forward') continue;
-
                         const targetKey = `${rel.target_app}.${rel.target_model}`;
-                        const targetPos = nodePositions[targetKey];
 
-                        if (!targetPos) continue;
+                        // Only handle self-referential here
+                        if (targetKey !== sourceKey) continue;
 
                         const relClass = rel.type.replace('_', '-');
-                        const x1 = sourcePos.x + 110;
-                        const y1 = sourcePos.y + 60;
-                        const x2 = targetPos.x + 110;
-                        const y2 = targetPos.y + 60;
+                        const height = nodeHeights[sourceKey] || 180;
 
-                        // Simple curved line
-                        const midX = (x1 + x2) / 2;
+                        // Draw a loop on the right side
+                        const loopSize = 40;
+                        const startX = sourcePos.x + 220;
+                        const startY = sourcePos.y + height / 3;
+                        const endY = sourcePos.y + height * 2 / 3;
+
+                        const pathD = `M ${startX} ${startY} ` +
+                            `L ${startX + loopSize} ${startY} ` +
+                            `L ${startX + loopSize} ${endY} ` +
+                            `L ${startX} ${endY}`;
+
                         edgesHtml += `
                             <path class="relationship-line ${relClass}"
-                                  d="M ${x1} ${y1} Q ${midX} ${y1} ${midX} ${(y1 + y2) / 2} T ${x2} ${y2}"
+                                  d="${pathD}"
+                                  marker-end="url(#marker-one-fk)"
                                   data-source="${sourceKey}"
-                                  data-target="${targetKey}" />
+                                  data-target="${targetKey}"
+                                  data-rel-name="${rel.name}"
+                                  data-rel-type="${rel.type}">
+                                <title>${rel.name}: ${sourceKey} → ${targetKey} (self)</title>
+                            </path>
                         `;
                     }
                 }
@@ -537,22 +299,33 @@
             for (const [appLabel, appData] of Object.entries(schema.apps)) {
                 for (const [modelName, model] of Object.entries(appData.models)) {
                     const key = `${appLabel}.${modelName}`;
-                    const pos = nodePositions[key];
+                    const pos = nodePositions.get(key);
+                    if (!pos) continue;
+
                     const isSelected = selectedModel === key;
+                    const height = nodeHeights[key] || 180;
 
                     const fields = (model.fields || []).slice(0, 5);
-                    const fieldsHtml = fields.map(f => `
-                        <div class="model-node-field">
-                            <span>${f.name}</span>
-                            <span class="model-node-field-type">${f.type}</span>
-                        </div>
-                    `).join('');
+                    const fieldsHtml = fields.map(f => {
+                        const isPk = f.primary_key;
+                        const isFk = model.relationships?.some(r =>
+                            r.direction === 'forward' && r.name === f.name.replace('_id', '')
+                        );
+                        const fieldClass = isPk ? 'pk' : (isFk ? 'fk' : '');
+                        const icon = isPk ? '🔑 ' : (isFk ? '🔗 ' : '');
+                        return `
+                            <div class="model-node-field ${fieldClass}">
+                                <span>${icon}${f.name}</span>
+                                <span class="model-node-field-type">${f.type}</span>
+                            </div>
+                        `;
+                    }).join('');
 
                     nodesHtml += `
-                        <foreignObject x="${pos.x}" y="${pos.y}" width="220" height="auto" class="node-wrapper" data-key="${key}">
-                            <div xmlns="http://www.w3.org/1999/xhtml" 
+                        <foreignObject x="${pos.x}" y="${pos.y}" width="220" height="${height}" class="node-wrapper" data-key="${key}">
+                            <div xmlns="http://www.w3.org/1999/xhtml"
                                  class="model-node ${isSelected ? 'selected' : ''}"
-                                 data-app="${appLabel}" 
+                                 data-app="${appLabel}"
                                  data-model="${modelName}">
                                 <div class="model-node-header">
                                     ${model.verbose_name}
@@ -569,6 +342,7 @@
             }
 
             canvas.innerHTML = `
+                ${markerDefs}
                 <g transform="translate(${transform.x}, ${transform.y}) scale(${transform.scale})">
                     ${edgesHtml}
                     ${nodesHtml}
@@ -585,7 +359,7 @@
                 node.addEventListener('mousedown', (e) => {
                     isDragging = true;
                     dragTarget = `${node.dataset.app}.${node.dataset.model}`;
-                    const pos = nodePositions[dragTarget];
+                    const pos = nodePositions.get(dragTarget);
                     dragOffset = {
                         x: (e.clientX - transform.x) / transform.scale - pos.x,
                         y: (e.clientY - transform.y) / transform.scale - pos.y
@@ -688,12 +462,17 @@
             renderCanvas();
         });
 
+        document.getElementById('re-layout').addEventListener('click', () => {
+            calculateLayout();
+            renderCanvas();
+        });
+
         // Canvas pan
         let isPanning = false;
         let panStart = { x: 0, y: 0 };
 
         canvas.addEventListener('mousedown', (e) => {
-            if (e.target === canvas || e.target.tagName === 'svg') {
+            if (e.target === canvas || e.target.tagName === 'svg' || e.target.tagName === 'g') {
                 isPanning = true;
                 panStart = { x: e.clientX - transform.x, y: e.clientY - transform.y };
             }
@@ -705,10 +484,17 @@
                 transform.y = e.clientY - panStart.y;
                 renderCanvas();
             } else if (isDragging && dragTarget) {
-                nodePositions[dragTarget] = {
+                nodePositions.set(dragTarget, {
                     x: (e.clientX - transform.x) / transform.scale - dragOffset.x,
                     y: (e.clientY - transform.y) / transform.scale - dragOffset.y
-                };
+                });
+                // Recalculate edge routes after moving a node
+                edgeRoutes = Layout.calculateEdgeRoutes(
+                    nodePositions,
+                    layoutData.edges,
+                    nodeHeights,
+                    layoutData.nodeMap
+                );
                 renderCanvas();
             }
         });

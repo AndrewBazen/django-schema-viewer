@@ -73,7 +73,7 @@ def get_relationship_info(field) -> dict | None:
             "target_model": related_model._meta.model_name,
             "related_name": field.remote_field.related_name or f"{field.model._meta.model_name}_set",
             "null": getattr(field, "null", False),
-            "on_delete": str(field.remote_field.on_delete.__name__) if hasattr(field.remote_field, "on_delete") else None,
+            "on_delete": str(field.remote_field.on_delete.__name__) if hasattr(field.remote_field, "on_delete") and field.remote_field.on_delete else None,
         }
 
         # Add through model for M2M

@@ -45,7 +45,7 @@ if settings.DEBUG:
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/django-schema-viewer.git
+git clone https://github.com/AndrewBazen/django-schema-viewer.git
 cd django-schema-viewer
 
 # Install in development mode
